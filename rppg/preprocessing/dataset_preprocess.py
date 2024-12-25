@@ -107,7 +107,8 @@ def preprocessing(cfg, dataset):
 
     if not os.path.isdir(cfg.data_root_path + dataset.name):
         # os.makedirs(dataset_root_path)
-        raise ValueError("dataset path does not exist, check data_root_path in config.yaml")
+        dataset_path = cfg.data_root_path + dataset.name
+        raise ValueError(f"Dataset path '{dataset_path}' does not exist. Check 'data_root_path' in config.yaml.")
     return_dict = manager.dict()
 
     RawDataPathLoader = None
@@ -239,11 +240,17 @@ def preprocess_Dataset(preprocess_type, dataset_root_path, data_path, vid_name, 
     if not os.path.isdir(dir_path):
         mkdir_p(dir_path)
 
-    data = h5py.File(dir_path + data_path + ".hdf5", "w")
-    data.create_dataset('raw_video', data=raw_video)
-    data.create_dataset('preprocessed_label', data=preprocessed_label)
-    data.create_dataset('hrv', data=hrv)
-    data.close()
+
+    # 파일 경로 생성
+    raw_video_path = dir_path + data_path + "_raw_video.npy"#os.path.join(dir_path, data_path + "_raw_video.npy")
+    preprocessed_label_path = dir_path + data_path + "_preprocessed_label.npy"
+    hrv_path = dir_path + data_path + "_hrv.npy"
+
+
+    # 데이터 저장
+    np.save(raw_video_path, raw_video)
+    np.save(preprocessed_label_path, preprocessed_label)
+    np.save(hrv_path, hrv)
 
 
 def chunk_preprocessing(preprocess_type, data_list, dataset_root_path, vid_name, ground_truth_name, dataset_name,

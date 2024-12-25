@@ -146,7 +146,7 @@ def dataset_loader(fit_cfg, dataset_path):
 
         path = get_all_files_in_path(root_file_path)
         if debug_flag:
-            path = path[:10]
+            path = path[:10*3]
         path_len = len(path)
         # for test
 
@@ -154,11 +154,11 @@ def dataset_loader(fit_cfg, dataset_path):
         if eval_flag and train_flag:
             test_len = int(np.floor(path_len * 0.1))
             eval_path = path[-test_len:]
-        else:
-            if debug_flag:
-                eval_path = path[:5]
-            else:
-                eval_path = path
+        # else:
+        #     if debug_flag:
+        #         eval_path = path[:5]
+        #     else:
+        #         eval_path = path
 
         if train_flag:
             train_len = int(np.floor(path_len * 0.8))
@@ -325,6 +325,7 @@ def get_all_files_in_path(path):
     config에는 annotation 파일 경로만 추가하고 main 이나 sweep 에서 condition에 해당하는 파일들만 가져오면 될듯.
     annotation 파일 >> dataset 논문 참고
     '''
+    files.sort()
     return files
 
 
@@ -347,22 +348,26 @@ def get_dataset(path, model_type, model_name, time_length, batch_size, overlap_i
                 keypoint_data = []
             round_flag = 1
         elif round_flag == 1:
-            if idx == len(path):
+            if idx == len(path)//3:
                 break
-            file_name = path[idx]
+            file_name = path[idx*3:idx*3+3]
             print(file_name)
-            if not os.path.isfile(file_name):
+            if not all(os.path.isfile(f) for f in file_name):
                 print("Stopped at ", idx)
                 break
 
             idx += 1
-            file = h5py.File(file_name)
+            # file = h5py.File(file_name)
+            hrv_file = np.load(file_name[0])
+            label_file = np.load(file_name[1])
+            video_file = np.load(file_name[2])
+
             # h5_tree(file)
             if model_type == 'DIFF':
-                num_frame, w, h, c = file['raw_video'][:].shape
+                num_frame, w, h, c = video_file.shape
                 if model_name == "BigSmall":
                     for i in range(num_frame):
-                        img = file['raw_video'][i]
+                        img = video_file[i]
                         appearance_data.append(cv2.resize(img[:, :, 3:], (144, 144), interpolation=cv2.INTER_AREA))
                         motion_data.append(cv2.resize(img[:, :, :3], (9, 9), interpolation=cv2.INTER_AREA))
 
@@ -370,15 +375,15 @@ def get_dataset(path, model_type, model_name, time_length, batch_size, overlap_i
                     new_shape = (num_frame, img_size, img_size, c)
                     resized_img = np.zeros(new_shape)
                     for i in range(num_frame):
-                        img = file['raw_video'][i]
+                        img = video_file[i]
                         resized_img[i] = cv2.resize(img, (img_size, img_size))
                     appearance_data.extend(resized_img[:, :, :, -3:])
                     motion_data.extend(resized_img[:, :, :, :3])
                 else:
-                    appearance_data.extend(file['raw_video'][:, :, :, -3:])
-                    motion_data.extend(file['raw_video'][:, :, :, :3])
+                    appearance_data.extend(video_file[:, :, :, -3:])
+                    motion_data.extend(video_file[:, :, :, :3])
 
-                temp_label = file['preprocessed_label']
+                temp_label = label_file#file['preprocessed_label']
                 # resample label data
                 if len(temp_label) != num_frame:
                     print('-----Resampling label data-----')
@@ -396,12 +401,12 @@ def get_dataset(path, model_type, model_name, time_length, batch_size, overlap_i
             elif model_name in ["APNETv2"]:
                 start = 0
                 end = time_length
-                label = detrend(file['preprocessed_label'], 100)
+                label = detrend(label_file, 100)
 
-                while end <= len(file['raw_video']):
-                    video_chunk = file['raw_video'][start:end]
+                while end <= len(video_file):
+                    video_chunk = video_file[start:end]
                     video_data.append(video_chunk)
-                    keypoint_data.append(file['keypoint'][start:end])
+                    keypoint_data.append(video_file[start:end])
                     tmp_label = label[start:end]
 
                     tmp_label = np.around(normalize(tmp_label, 0, 1), 2)
@@ -411,22 +416,22 @@ def get_dataset(path, model_type, model_name, time_length, batch_size, overlap_i
                     end += time_length - overlap_interval
 
             elif model_name in ["EfficientPhys"]:
-                label = file['preprocessed_label']
+                label = label_file
                 diff_norm_label = np.diff(label, axis=0)
                 diff_norm_label /= np.std(diff_norm_label)
                 diff_norm_label = np.array(diff_norm_label)
                 diff_norm_label[np.isnan(diff_norm_label)] = 0
 
-                num_frame, w, h, c = file['raw_video'][:].shape
+                num_frame, w, h, c = video_file[:].shape
                 if w != img_size and h != img_size:
                     new_shape = (num_frame, img_size, img_size, c)
                     resized_img = np.zeros(new_shape, dtype=np.float32)
                     for i in range(num_frame):
-                        img = file['raw_video'][i]  # / 255.
+                        img = video_file[i]  # / 255.
                         resized_img[i] = cv2.resize(img, (img_size, img_size), interpolation=cv2.INTER_AREA)
                     diff_video = np.diff(resized_img, axis=0)
                 else:
-                    diff_video = np.diff(file['raw_video'][:], axis=0)
+                    diff_video = np.diff(video_file[:], axis=0)
 
                 num_frame = ((num_frame - 1) // time_length) * time_length
                 label_data.extend(diff_norm_label[:num_frame])
@@ -436,9 +441,9 @@ def get_dataset(path, model_type, model_name, time_length, batch_size, overlap_i
                 start = 0
                 end = time_length
                 # label = detrend(file['preprocessed_label'], 100)
-                label = file['preprocessed_label']
-                hr_label = file['hrv']
-                num_frame, w, h, c = file['raw_video'][:].shape
+                label = label_file
+                hr_label = hrv_file
+                num_frame, w, h, c = video_file[:].shape
 
                 if len(label) != num_frame:
                     label = np.interp(
@@ -451,7 +456,7 @@ def get_dataset(path, model_type, model_name, time_length, batch_size, overlap_i
                     if model_type.__contains__('RAW'):
                         resized_img = np.zeros(new_shape, dtype=np.uint8)
                         for i in range(num_frame):
-                            img = file['raw_video'][i] * 255
+                            img = video_file[i] * 255
                             w, h, c = img.shape
                             w_m, h_m = w - round(w * 2/3), h - round(h * 2/3)
                             img = cv2.cvtColor(img.astype(np.uint8),cv2.COLOR_BGR2RGB)
@@ -459,14 +464,14 @@ def get_dataset(path, model_type, model_name, time_length, batch_size, overlap_i
                     else:
                         resized_img = np.zeros(new_shape, dtype=np.float32)
                         for i in range(num_frame):
-                            img = file['raw_video'][i]
+                            img = video_file[i]
                             resized_img[i] = cv2.resize(img, (img_size, img_size), interpolation=cv2.INTER_AREA)
 
-                while end <= len(file['raw_video']):
+                while end <= len(video_file):
                     if w != img_size:
                         video_chunk = resized_img[start:end]
                     else:
-                        video_chunk = file['raw_video'][start:end]
+                        video_chunk = video_file[start:end]
                     if not model_type.__contains__('RAW'):
                         video_chunk = (video_chunk - np.mean(video_chunk)) / np.std(video_chunk)
                     # video_chunk = int(video_chunk*)
@@ -480,7 +485,6 @@ def get_dataset(path, model_type, model_name, time_length, batch_size, overlap_i
                     start += time_length - overlap_interval
                     end += time_length - overlap_interval
 
-            file.close()
             round_flag = 2
         elif round_flag == 2:
             if model_type == 'DIFF':
